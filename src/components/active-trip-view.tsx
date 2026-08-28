@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api";
 import { endTrip, listTripPhotos, TripPhotoSummary, TripSummary } from "@/lib/trips";
 import { pickPhoto, uploadPhoto, PhotoType } from "@/lib/photo-upload";
 import { ReportDamageView } from "@/components/report-damage-view";
+import { ReportIncidentView } from "@/components/report-incident-view";
 
 const PHOTO_TYPES: { type: PhotoType; label: string }[] = [
   { type: "front", label: "Front" },
@@ -22,6 +23,8 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
   const theme = useTheme();
   const [reportingDamage, setReportingDamage] = useState(false);
   const [damageJustReported, setDamageJustReported] = useState(false);
+  const [reportingIncident, setReportingIncident] = useState(false);
+  const [incidentJustReported, setIncidentJustReported] = useState(false);
   const [slots, setSlots] = useState<Record<PhotoType, PhotoSlotState>>({
     front: "missing",
     left: "missing",
@@ -108,6 +111,20 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
     );
   }
 
+  if (reportingIncident) {
+    return (
+      <ReportIncidentView
+        tripId={trip.id}
+        vehicleId={trip.vehicleId}
+        onDone={() => {
+          setReportingIncident(false);
+          setIncidentJustReported(true);
+        }}
+        onCancel={() => setReportingIncident(false)}
+      />
+    );
+  }
+
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <ThemedText type="subtitle" style={styles.title}>
@@ -117,14 +134,26 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
         Started at {trip.startOdometer} km
       </ThemedText>
 
-      <TouchableOpacity onPress={() => setReportingDamage(true)} style={styles.reportDamageButton}>
-        <ThemedText themeColor="accent" type="small">
-          Report damage
-        </ThemedText>
-      </TouchableOpacity>
+      <ThemedView style={styles.reportRow}>
+        <TouchableOpacity onPress={() => setReportingDamage(true)} style={styles.reportButton}>
+          <ThemedText themeColor="accent" type="small">
+            Report damage
+          </ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setReportingIncident(true)} style={styles.reportButton}>
+          <ThemedText themeColor="accent" type="small">
+            Report incident
+          </ThemedText>
+        </TouchableOpacity>
+      </ThemedView>
       {damageJustReported && (
         <ThemedText themeColor="textSecondary" type="small" style={styles.hint}>
-          Reported — your dispatcher can see it.
+          Damage reported — your dispatcher can see it.
+        </ThemedText>
+      )}
+      {incidentJustReported && (
+        <ThemedText themeColor="textSecondary" type="small" style={styles.hint}>
+          Incident sent to your dispatcher.
         </ThemedText>
       )}
 
@@ -220,7 +249,8 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: Spacing.four, gap: Spacing.two },
   title: { textAlign: "center" },
   hint: { textAlign: "center", marginBottom: Spacing.two },
-  reportDamageButton: { alignItems: "center", paddingVertical: Spacing.two },
+  reportRow: { flexDirection: "row", justifyContent: "center", gap: Spacing.four },
+  reportButton: { alignItems: "center", paddingVertical: Spacing.two },
   sectionLabel: { marginTop: Spacing.three, marginBottom: Spacing.one },
   photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.two },
   photoSlot: {
