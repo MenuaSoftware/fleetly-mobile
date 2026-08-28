@@ -7,6 +7,13 @@ import '@/global.css';
 
 import { Platform } from 'react-native';
 
+// accent/accentBg are the one brand color pulled in from the rest of
+// the product (../fleetly/docs/index.html, applied via the admin
+// panel's globals.css) — everything else here is still the scaffold's
+// own neutral palette. A full design pass is deliberately deferred
+// until the core screens exist (see fleetly-admin-panel-progress
+// memory); this is just "don't ship the wrong brand color", not that
+// pass arriving early.
 export const Colors = {
   light: {
     text: '#000000',
@@ -14,6 +21,8 @@ export const Colors = {
     backgroundElement: '#F0F0F3',
     backgroundSelected: '#E0E1E6',
     textSecondary: '#60646C',
+    accent: '#d90429',
+    accentBg: '#fff0f2',
   },
   dark: {
     text: '#ffffff',
@@ -21,6 +30,8 @@ export const Colors = {
     backgroundElement: '#212225',
     backgroundSelected: '#2E3135',
     textSecondary: '#B0B4BA',
+    accent: '#ff4d6a',
+    accentBg: '#3a1015',
   },
 } as const;
 

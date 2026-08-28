@@ -2,6 +2,13 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Buffer + global (src/lib/crypto.ts, src/lib/polyfills.ts) need
+    // @types/node's ambient declarations. Not auto-included without
+    // this explicit "types" entry — confirmed by testing `tsc --types
+    // node` in isolation, which fixed it where a bare install didn't.
+    // The polyfills these types describe are real (buffer package +
+    // manual `global.Buffer =` assignment), not just type-only.
+    "types": ["node"],
     "paths": {
       "@/*": [
         "./src/*"
