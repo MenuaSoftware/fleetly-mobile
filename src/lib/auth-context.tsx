@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import {
+  apiFetch,
   ApiError,
   enrollDevice,
   loginWithBadge,
@@ -23,6 +24,8 @@ export type AuthStatus =
 interface AuthContextValue {
   status: AuthStatus;
   errorMessage: string | null;
+  /** Set once status becomes 'authenticated' — fetched from /auth/me, not decoded client-side from the token. */
+  driverId: string | null;
   /** Generates a device keypair, enrolls it against this badge, and moves to pending-approval on success. */
   enroll: (badgeToken: string) => Promise<void>;
   /** Re-attempts login with the already-enrolled device — call from the pending-approval screen's retry button. */
@@ -51,8 +54,24 @@ function shouldReEnroll(reason: string | undefined): boolean {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [driverId, setDriverId] = useState<string | null>(null);
 
-  async function attemptStoredLogin() {
+  // useCallback (empty deps — each only closes over stable setState
+  // setters and module-level imports, nothing that changes across
+  // renders) so the mount effect below can list them as dependencies
+  // instead of triggering react-hooks/exhaustive-deps.
+  const loadDriverId = useCallback(async () => {
+    try {
+      const me = await apiFetch<{ driverId: string }>("/auth/me");
+      setDriverId(me.driverId);
+    } catch {
+      // Non-fatal — the trip screens degrade to "loading" rather than
+      // crash if this one call fails; apiFetch's own session-expiry
+      // handling is what actually matters for staying signed in.
+    }
+  }, []);
+
+  const attemptStoredLogin = useCallback(async () => {
     const device = await getDeviceCredentials();
     if (!device) {
       setStatus("needs-enroll");
@@ -63,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await saveSession(session);
       setErrorMessage(null);
       setStatus("authenticated");
+      await loadDriverId();
     } catch (err) {
       const reason = err instanceof ApiError ? err.reason : undefined;
       if (shouldReEnroll(reason)) {
@@ -74,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setErrorMessage(err instanceof Error ? err.message : "Could not sign in.");
       setStatus("pending-approval");
     }
-  }
+  }, [loadDriverId]);
 
   useEffect(() => {
     (async () => {
@@ -86,11 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const session = await getSession();
       if (session) {
         setStatus("authenticated");
+        await loadDriverId();
         return;
       }
       await attemptStoredLogin();
     })();
-  }, []);
+  }, [loadDriverId, attemptStoredLogin]);
 
   async function enroll(badgeToken: string): Promise<void> {
     setErrorMessage(null);
@@ -118,11 +139,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await clearSession();
     await clearDeviceCredentials();
     setErrorMessage(null);
+    setDriverId(null);
     setStatus("needs-enroll");
   }
 
   return (
-    <AuthContext.Provider value={{ status, errorMessage, enroll, retryLogin, signOut }}>
+    <AuthContext.Provider value={{ status, errorMessage, driverId, enroll, retryLogin, signOut }}>
       {children}
     </AuthContext.Provider>
   );
