@@ -9,6 +9,7 @@ import { endTrip, listTripPhotos, TripPhotoSummary, TripSummary } from "@/lib/tr
 import { pickPhoto, uploadPhoto, PhotoType } from "@/lib/photo-upload";
 import { ReportDamageView } from "@/components/report-damage-view";
 import { ReportIncidentView } from "@/components/report-incident-view";
+import { MyDocumentsView } from "@/components/my-documents-view";
 
 const PHOTO_TYPES: { type: PhotoType; label: string }[] = [
   { type: "front", label: "Front" },
@@ -24,6 +25,7 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
   const [reportingDamage, setReportingDamage] = useState(false);
   const [damageJustReported, setDamageJustReported] = useState(false);
   const [reportingIncident, setReportingIncident] = useState(false);
+  const [viewingDocuments, setViewingDocuments] = useState(false);
   const [incidentJustReported, setIncidentJustReported] = useState(false);
   // Damage reported at the closing check, unlike the mid-route button
   // above: docs/trip-state-machine.md gates it exactly like the four end
@@ -148,6 +150,16 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
     );
   }
 
+  if (viewingDocuments) {
+    return (
+      <MyDocumentsView
+        driverId={trip.driverId}
+        vehicleId={trip.vehicleId}
+        onCancel={() => setViewingDocuments(false)}
+      />
+    );
+  }
+
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <ThemedText type="subtitle" style={styles.title}>
@@ -166,6 +178,11 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
         <TouchableOpacity onPress={() => setReportingIncident(true)} style={styles.reportButton}>
           <ThemedText themeColor="accent" type="small">
             Report incident
+          </ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setViewingDocuments(true)} style={styles.reportButton}>
+          <ThemedText themeColor="accent" type="small">
+            My documents
           </ThemedText>
         </TouchableOpacity>
       </ThemedView>
