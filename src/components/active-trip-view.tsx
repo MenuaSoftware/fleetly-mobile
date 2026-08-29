@@ -25,6 +25,14 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
   const [damageJustReported, setDamageJustReported] = useState(false);
   const [reportingIncident, setReportingIncident] = useState(false);
   const [incidentJustReported, setIncidentJustReported] = useState(false);
+  // Damage reported at the closing check, unlike the mid-route button
+  // above: docs/trip-state-machine.md gates it exactly like the four end
+  // photos, and report-damage-view.tsx's "closing" phase only calls
+  // onDone() once that damage's own photo is genuinely confirmed — so
+  // this counter only ever grows for reports that are already fully
+  // gate-satisfied, never a pending/unconfirmed one.
+  const [reportingClosingDamage, setReportingClosingDamage] = useState(false);
+  const [closingDamageCount, setClosingDamageCount] = useState(0);
   const [slots, setSlots] = useState<Record<PhotoType, PhotoSlotState>>({
     front: "missing",
     left: "missing",
@@ -125,6 +133,21 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
     );
   }
 
+  if (reportingClosingDamage) {
+    return (
+      <ReportDamageView
+        tripId={trip.id}
+        vehicleId={trip.vehicleId}
+        phase="closing"
+        onDone={() => {
+          setReportingClosingDamage(false);
+          setClosingDamageCount((n) => n + 1);
+        }}
+        onCancel={() => setReportingClosingDamage(false)}
+      />
+    );
+  }
+
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <ThemedText type="subtitle" style={styles.title}>
@@ -169,6 +192,7 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
             return (
               <TouchableOpacity
                 key={type}
+                testID={`photo-slot-${type}`}
                 onPress={() => handleAddPhoto(type)}
                 disabled={state === "uploading"}
                 style={[
@@ -202,6 +226,27 @@ export function ActiveTripView({ trip, onEnded }: { trip: TripSummary; onEnded: 
           </ThemedText>
         ) : null,
       )}
+
+      <ThemedText type="smallBold" style={styles.sectionLabel}>
+        Damage found at closing
+      </ThemedText>
+      <ThemedText themeColor="textSecondary" type="small" style={styles.hint}>
+        Anything new since you started — this needs a photo, unlike damage reported mid-route.
+      </ThemedText>
+      {closingDamageCount > 0 && (
+        <ThemedText themeColor="accent" type="small" style={styles.hint}>
+          {closingDamageCount} closing damage report{closingDamageCount === 1 ? "" : "s"} added, with{" "}
+          {closingDamageCount === 1 ? "its" : "their"} photo confirmed.
+        </ThemedText>
+      )}
+      <TouchableOpacity
+        onPress={() => setReportingClosingDamage(true)}
+        style={[styles.closingDamageButton, { borderColor: theme.backgroundSelected }]}
+      >
+        <ThemedText themeColor="accent" type="small">
+          + Report damage found at closing
+        </ThemedText>
+      </TouchableOpacity>
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>
         End trip
@@ -263,6 +308,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   slotError: { marginTop: Spacing.one },
+  closingDamageButton: {
+    borderWidth: 2,
+    borderRadius: Spacing.three,
+    paddingVertical: Spacing.three,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   input: {
     borderWidth: 1,
     borderRadius: Spacing.three,

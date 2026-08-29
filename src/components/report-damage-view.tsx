@@ -15,6 +15,7 @@ import { Spacing } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { ApiError } from "@/lib/api";
 import { reportDamage, DamageView } from "@/lib/damage";
+import { pickPhoto, uploadDamagePhoto } from "@/lib/photo-upload";
 
 const VIEWS: { value: DamageView; label: string }[] = [
   { value: "front", label: "Front" },
@@ -36,11 +37,23 @@ const VIEWS: { value: DamageView; label: string }[] = [
 export function ReportDamageView({
   tripId,
   vehicleId,
+  phase = "mid_route",
   onDone,
   onCancel,
 }: {
   tripId: string;
   vehicleId: string;
+  /**
+   * docs/trip-state-machine.md: damage reported mid-route stays
+   * queueable and never blocks anything; damage reported at the closing
+   * condition check is evidence for the trip's closing state and is
+   * gated exactly like the four end photos — trip.controller.ts's
+   * end() rejects ending the trip while any 'closing' damage still
+   * lacks a confirmed photo. "closing" therefore requires a photo
+   * before this view calls onDone(); "mid_route" (the default, and the
+   * only mode this view supported before) does not.
+   */
+  phase?: "mid_route" | "closing";
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -51,6 +64,13 @@ export function ReportDamageView({
   const [note, setNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once the damage row itself is created for the closing phase —
+  // from that point on there's no more "cancel": the report is already
+  // real server-side, only its required photo is still missing. This
+  // view moves into a photo-only stage rather than staying on the form.
+  const [createdDamageId, setCreatedDamageId] = useState<string | null>(null);
+  const [photoStatus, setPhotoStatus] = useState<"idle" | "uploading" | "error">("idle");
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   /**
    * event.nativeEvent.locationX/locationY — the "obvious" way to get a
@@ -79,15 +99,21 @@ export function ReportDamageView({
     setIsSubmitting(true);
     setError(null);
     try {
-      await reportDamage(vehicleId, {
+      const report = await reportDamage(vehicleId, {
         view,
         positionX: position.x,
         positionY: position.y,
         tripId,
-        reportedPhase: "mid_route",
+        reportedPhase: phase,
         note: note.trim() || undefined,
       });
-      onDone();
+      if (phase === "closing") {
+        // Move into the mandatory photo stage rather than finishing —
+        // the report already exists server-side at this point.
+        setCreatedDamageId(report.id);
+      } else {
+        onDone();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not report this damage.");
     } finally {
@@ -95,11 +121,75 @@ export function ReportDamageView({
     }
   }
 
+  async function handleAddClosingPhoto() {
+    if (!createdDamageId) return;
+    setPhotoError(null);
+    let photo;
+    try {
+      photo = await pickPhoto();
+    } catch (err) {
+      setPhotoStatus("error");
+      setPhotoError(err instanceof Error ? err.message : "Could not open the photo picker.");
+      return;
+    }
+    if (!photo) return; // driver cancelled the picker — still on the photo stage, can retry
+
+    setPhotoStatus("uploading");
+    try {
+      await uploadDamagePhoto(vehicleId, createdDamageId, photo);
+      onDone();
+    } catch (err) {
+      setPhotoStatus("error");
+      setPhotoError(err instanceof ApiError ? err.message : "Could not upload this photo.");
+    }
+  }
+
+  if (createdDamageId) {
+    return (
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+        <ThemedText type="subtitle" style={styles.title}>
+          Add a photo
+        </ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.hint}>
+          Damage found at the closing check needs a photo before you can end the trip.
+        </ThemedText>
+        {photoError && (
+          <ThemedText role="alert" themeColor="accent" style={styles.error}>
+            {photoError}
+          </ThemedText>
+        )}
+        <TouchableOpacity
+          testID="closing-damage-photo-button"
+          onPress={handleAddClosingPhoto}
+          disabled={photoStatus === "uploading"}
+          style={[
+            styles.button,
+            { backgroundColor: theme.accent },
+            photoStatus === "uploading" && styles.buttonDisabled,
+          ]}
+        >
+          {photoStatus === "uploading" ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <ThemedText style={styles.buttonText}>
+              {photoStatus === "error" ? "Retry photo" : "Take or choose a photo"}
+            </ThemedText>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <ThemedText type="subtitle" style={styles.title}>
-        Report damage
+        {phase === "closing" ? "Damage found at closing" : "Report damage"}
       </ThemedText>
+      {phase === "closing" && (
+        <ThemedText themeColor="textSecondary" style={styles.hint}>
+          This is evidence for how the vehicle was handed back — a photo will be required next.
+        </ThemedText>
+      )}
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>
         Which side?
@@ -179,7 +269,9 @@ export function ReportDamageView({
         {isSubmitting ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <ThemedText style={styles.buttonText}>Report damage</ThemedText>
+          <ThemedText style={styles.buttonText}>
+            {phase === "closing" ? "Continue to photo" : "Report damage"}
+          </ThemedText>
         )}
       </TouchableOpacity>
       <TouchableOpacity onPress={onCancel} disabled={isSubmitting} style={styles.secondaryButton}>
@@ -193,6 +285,7 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   container: { flexGrow: 1, padding: Spacing.four, gap: Spacing.two },
   title: { textAlign: "center", marginBottom: Spacing.two },
+  hint: { textAlign: "center", marginBottom: Spacing.two },
   sectionLabel: { marginTop: Spacing.three, marginBottom: Spacing.one },
   viewGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.two },
   viewButton: {

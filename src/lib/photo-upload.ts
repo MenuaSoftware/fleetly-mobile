@@ -117,3 +117,49 @@ export async function uploadPhoto(
   await apiFetch(`/trips/${tripId}/photos/${intent.photoId}/confirm`, { method: "POST" });
   return { photoId: intent.photoId };
 }
+
+/**
+ * damage-photo.controller.ts's intent/confirm shape — same signed-URL
+ * round trip as uploadPhoto() above (ask for a slot, PUT the bytes
+ * straight to Storage, confirm), just against
+ * /vehicles/:vehicleId/damage/:damageId/photos instead of a trip's own
+ * photos. Used for damage reported at the closing condition check,
+ * which report-damage-view.tsx's own comment explains is gated exactly
+ * like the four end photos — this is that gate's photo half.
+ */
+export async function uploadDamagePhoto(
+  vehicleId: string,
+  damageId: string,
+  photo: PickedPhoto,
+): Promise<UploadPhotoResult> {
+  const bytes = base64ToBytes(photo.base64);
+  const checksum = bytesToHex(sha256(bytes));
+
+  const intent = await apiFetch<{ photoId: string; uploadUrl: string }>(
+    `/vehicles/${vehicleId}/damage/${damageId}/photos`,
+    {
+      method: "POST",
+      body: {
+        mimeType: photo.mimeType,
+        byteSize: bytes.byteLength,
+        checksum,
+        originalFilename: photo.fileName,
+        capturedAt: new Date().toISOString(),
+      },
+    },
+  );
+
+  const uploadRes = await fetch(intent.uploadUrl, {
+    method: "PUT",
+    headers: { "content-type": photo.mimeType },
+    body: bytes as BodyInit,
+  });
+  if (!uploadRes.ok) {
+    throw new ApiError(`Could not upload the photo (${uploadRes.status}).`, uploadRes.status);
+  }
+
+  await apiFetch(`/vehicles/${vehicleId}/damage/${damageId}/photos/${intent.photoId}/confirm`, {
+    method: "POST",
+  });
+  return { photoId: intent.photoId };
+}
