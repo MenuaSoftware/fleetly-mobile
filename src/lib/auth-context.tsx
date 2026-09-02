@@ -39,16 +39,24 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * A rejected login's `reason` (see login.controller.ts) decides what
  * this app does next — stable and machine-readable, not the driver-
  * facing message text, which is free to change independently.
- * 'device_not_approved' means keep waiting; everything else that can
- * reject a *previously working* device (badge revoked/reissued,
- * driver deactivated) means this device's stored credentials can never
- * work again, so wipe them and send the driver back to enrollment.
+ * 'device_not_approved' means keep waiting (a first-time enrollment
+ * sitting in the dispatcher's queue). Everything else that can reject a
+ * *previously working* device — badge revoked/reissued, driver
+ * deactivated, or this device itself revoked (lost-phone flow /
+ * DeviceController.revoke(), or an enrollment a dispatcher rejected)
+ * — means these stored credentials can never work again, so wipe them
+ * and send the driver back to enrollment rather than leaving them stuck
+ * retrying a login that will never succeed.
  * 'signature_expired'/'signature_invalid' are treated as transient —
  * surfaced as an error but nothing is wiped, since a bad clock or a
  * one-off glitch doesn't mean re-enrollment is needed.
  */
 function shouldReEnroll(reason: string | undefined): boolean {
-  return reason === "badge_not_found" || reason === "driver_inactive";
+  return (
+    reason === "badge_not_found" ||
+    reason === "driver_inactive" ||
+    reason === "device_revoked"
+  );
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

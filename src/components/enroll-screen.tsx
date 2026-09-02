@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { ActivityIndicator, StyleSheet, TextInput, TouchableOpacity } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { OrDivider } from "@/components/or-divider";
+import { QrScanner } from "@/components/qr-scanner";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { useAuth } from "@/lib/auth-context";
@@ -8,25 +10,42 @@ import { Spacing } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 
 /**
- * Manual entry, not a camera/QR scan — the physical badge printing
- * flow doesn't exist yet either, so there's nothing real to scan
- * against right now. This is the same badge token
- * IssueBadgeButton (fleetly-admin) shows a dispatcher exactly once;
- * copying it in here is the interim path until QR badges exist. Swap
- * this input for a scanner later without touching enroll() itself —
- * it only needs the raw token string, however it was obtained.
+ * Scan or type. The badge QR is printed by fleetly-admin at the moment
+ * the badge is issued (IssueBadgeButton) — the same raw token a
+ * dispatcher sees exactly once, wrapped in the `fleetly:badge:` payload
+ * lib/qr-payload.ts unwraps here.
+ *
+ * Manual entry stays as an equal path, not a deprecated one: there is
+ * no camera under `expo start --web`, a driver can decline the
+ * permission, and a printed badge can be damaged. enroll() itself is
+ * untouched by either route — it only ever needed the raw token
+ * string, however it was obtained.
  */
 export function EnrollScreen() {
   const { enroll, errorMessage } = useAuth();
   const [badgeToken, setBadgeToken] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const theme = useTheme();
+
+  async function submitToken(token: string) {
+    setIsSubmitting(true);
+    await enroll(token);
+    setIsSubmitting(false);
+  }
 
   async function handleSubmit() {
     if (!badgeToken.trim()) return;
-    setIsSubmitting(true);
-    await enroll(badgeToken.trim());
-    setIsSubmitting(false);
+    await submitToken(badgeToken.trim());
+  }
+
+  async function handleScanned(token: string) {
+    setIsScanning(false);
+    // Shown in the input as well as submitted, so a driver watching the
+    // screen can see what was actually read off the badge — and still
+    // has it there to correct by hand if enrolment is rejected.
+    setBadgeToken(token);
+    await submitToken(token);
   }
 
   return (
@@ -39,8 +58,35 @@ export function EnrollScreen() {
           Set up this phone
         </ThemedText>
         <ThemedText themeColor="textSecondary" style={styles.hint}>
-          Enter the badge code your dispatcher gave you.
+          Scan the QR code on your badge, or enter the code your
+          dispatcher gave you.
         </ThemedText>
+
+        {isScanning ? (
+          <QrScanner
+            kind="badge"
+            onScanned={handleScanned}
+            onCancel={() => setIsScanning(false)}
+          />
+        ) : (
+          <>
+            <Pressable
+              testID="scan-badge"
+              accessibilityRole="button"
+              onPress={() => setIsScanning(true)}
+              disabled={isSubmitting}
+              style={({ pressed }) => [
+                styles.button,
+                { backgroundColor: theme.accent },
+                isSubmitting && styles.buttonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <ThemedText style={styles.buttonText}>Scan badge</ThemedText>
+            </Pressable>
+            <OrDivider label="or enter it by hand" />
+          </>
+        )}
 
         <TextInput
           value={badgeToken}
@@ -62,21 +108,30 @@ export function EnrollScreen() {
           </ThemedText>
         )}
 
-        <TouchableOpacity
+        {/*
+          Outlined, not filled: scanning is the primary path now, and
+          two identical accent buttons stacked would read as two equal
+          choices rather than a fast path and its fallback.
+        */}
+        <Pressable
+          testID="submit-badge"
+          accessibilityRole="button"
           onPress={handleSubmit}
           disabled={isSubmitting || !badgeToken.trim()}
-          style={[
+          style={({ pressed }) => [
             styles.button,
-            { backgroundColor: theme.accent },
+            styles.buttonSecondary,
+            { borderColor: theme.backgroundSelected },
             (isSubmitting || !badgeToken.trim()) && styles.buttonDisabled,
+            pressed && styles.pressed,
           ]}
         >
           {isSubmitting ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={theme.text} />
           ) : (
-            <ThemedText style={styles.buttonText}>Continue</ThemedText>
+            <ThemedText style={styles.buttonTextSecondary}>Continue</ThemedText>
           )}
-        </TouchableOpacity>
+        </Pressable>
       </SafeAreaView>
     </ThemedView>
   );
@@ -103,11 +158,16 @@ const styles = StyleSheet.create({
   },
   error: { textAlign: "center", marginBottom: Spacing.two },
   button: {
+    minHeight: 48,
     borderRadius: Spacing.three,
     paddingVertical: Spacing.three,
     alignItems: "center",
     justifyContent: "center",
   },
+  buttonSecondary: { borderWidth: 1, backgroundColor: "transparent" },
+  pressed: { opacity: 0.6 },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  /** Inherits ThemedText's own foreground — the filled button's white would vanish on this one. */
+  buttonTextSecondary: { fontWeight: "600", fontSize: 16 },
 });

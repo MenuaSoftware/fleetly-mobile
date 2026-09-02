@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { ActivityIndicator, StyleSheet, TextInput, TouchableOpacity } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, TextInput } from "react-native";
+import { OrDivider } from "@/components/or-divider";
+import { QrScanner } from "@/components/qr-scanner";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Spacing } from "@/constants/theme";
@@ -8,12 +10,19 @@ import { ApiError } from "@/lib/api";
 import { getVehicle, startTrip, VehicleInfo } from "@/lib/trips";
 
 /**
- * Vehicle id entered manually, not scanned — the same stand-in as the
- * enroll screen's badge code entry: no physical NFC/QR tag on a real
- * vehicle exists yet to scan against. Looked up via GET /vehicles/:id
- * first so the driver confirms the actual plate/type before starting,
- * rather than typing an id blind and finding out what it was from the
- * error if it's wrong.
+ * Vehicle identified by scanning the QR sticker on the vehicle, or by
+ * typing its id. The sticker is printed from fleetly-admin's vehicle
+ * detail page, carrying the `fleetly:vehicle:` payload
+ * lib/qr-payload.ts unwraps.
+ *
+ * Either route then looks the vehicle up via GET /vehicles/:id before
+ * anything is started, so the driver confirms the actual plate/type
+ * first rather than committing to an id blind — that confirmation step
+ * matters more with scanning, not less, since a driver reading a
+ * sticker never sees the id at all.
+ *
+ * Manual entry is kept for the same reasons as the enroll screen's:
+ * no camera on web, permission can be declined, stickers get damaged.
  */
 export function StartTripView({ onStarted }: { onStarted: () => void }) {
   const theme = useTheme();
@@ -22,14 +31,19 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
   const [vehicle, setVehicle] = useState<VehicleInfo | null>(null);
   const [odometer, setOdometer] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleFindVehicle() {
-    if (!vehicleId.trim()) return;
+  // Takes the id explicitly rather than reading state: the scan path
+  // has the id in hand and must not depend on a setVehicleId render
+  // having landed first.
+  async function findVehicle(id: string) {
+    const trimmed = id.trim();
+    if (!trimmed) return;
     setIsLoading(true);
     setError(null);
     try {
-      const found = await getVehicle(vehicleId.trim());
+      const found = await getVehicle(trimmed);
       if (found.status === "out_of_service") {
         setError("This vehicle is marked out of service. Contact your dispatcher.");
         return;
@@ -41,6 +55,12 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function handleScanned(scannedId: string) {
+    setIsScanning(false);
+    setVehicleId(scannedId);
+    await findVehicle(scannedId);
   }
 
   async function handleStart() {
@@ -67,8 +87,35 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
       {step === "vehicle" && (
         <>
           <ThemedText themeColor="textSecondary" style={styles.hint}>
-            Enter the vehicle&rsquo;s id.
+            Scan the QR code on the vehicle, or enter its id.
           </ThemedText>
+
+          {isScanning ? (
+            <QrScanner
+              kind="vehicle"
+              onScanned={handleScanned}
+              onCancel={() => setIsScanning(false)}
+            />
+          ) : (
+            <>
+              <Pressable
+                testID="scan-vehicle"
+                accessibilityRole="button"
+                onPress={() => setIsScanning(true)}
+                disabled={isLoading}
+                style={({ pressed }) => [
+                  styles.button,
+                  { backgroundColor: theme.accent },
+                  isLoading && styles.buttonDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <ThemedText style={styles.buttonText}>Scan vehicle</ThemedText>
+              </Pressable>
+              <OrDivider label="or enter the id by hand" />
+            </>
+          )}
+
           <TextInput
             value={vehicleId}
             onChangeText={setVehicleId}
@@ -84,21 +131,26 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
               {error}
             </ThemedText>
           )}
-          <TouchableOpacity
-            onPress={handleFindVehicle}
+          {/* Outlined for the same reason as the enroll screen's: the fallback, not a second equal choice. */}
+          <Pressable
+            testID="find-vehicle"
+            accessibilityRole="button"
+            onPress={() => findVehicle(vehicleId)}
             disabled={isLoading || !vehicleId.trim()}
-            style={[
+            style={({ pressed }) => [
               styles.button,
-              { backgroundColor: theme.accent },
+              styles.buttonSecondary,
+              { borderColor: theme.backgroundSelected },
               (isLoading || !vehicleId.trim()) && styles.buttonDisabled,
+              pressed && styles.pressed,
             ]}
           >
             {isLoading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={theme.text} />
             ) : (
-              <ThemedText style={styles.buttonText}>Find vehicle</ThemedText>
+              <ThemedText style={styles.buttonTextSecondary}>Find vehicle</ThemedText>
             )}
-          </TouchableOpacity>
+          </Pressable>
         </>
       )}
 
@@ -127,13 +179,16 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
               {error}
             </ThemedText>
           )}
-          <TouchableOpacity
+          <Pressable
+            testID="start-trip"
+            accessibilityRole="button"
             onPress={handleStart}
             disabled={isLoading || !odometer.trim()}
-            style={[
+            style={({ pressed }) => [
               styles.button,
               { backgroundColor: theme.accent },
               (isLoading || !odometer.trim()) && styles.buttonDisabled,
+              pressed && styles.pressed,
             ]}
           >
             {isLoading ? (
@@ -141,17 +196,18 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
             ) : (
               <ThemedText style={styles.buttonText}>Start trip</ThemedText>
             )}
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             onPress={() => {
               setStep("vehicle");
               setVehicle(null);
               setError(null);
             }}
-            style={styles.secondaryButton}
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
           >
             <ThemedText themeColor="textSecondary">Wrong vehicle</ThemedText>
-          </TouchableOpacity>
+          </Pressable>
         </>
       )}
     </ThemedView>
@@ -173,7 +229,12 @@ const styles = StyleSheet.create({
   },
   error: { textAlign: "center", marginBottom: Spacing.two },
   button: { borderRadius: Spacing.three, paddingVertical: Spacing.three, alignItems: "center", justifyContent: "center" },
+  buttonSecondary: { borderWidth: 1, backgroundColor: "transparent" },
+  pressed: { opacity: 0.6 },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
-  secondaryButton: { alignItems: "center", paddingVertical: Spacing.three },
+  /** Inherits ThemedText's own foreground — the filled button's white would vanish on this one. */
+  buttonTextSecondary: { fontWeight: "600", fontSize: 16 },
+  secondaryButton: {
+    minHeight: 48, alignItems: "center", paddingVertical: Spacing.three },
 });
