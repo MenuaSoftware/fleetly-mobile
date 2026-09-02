@@ -8,7 +8,10 @@
     // node` in isolation, which fixed it where a bare install didn't.
     // The polyfills these types describe are real (buffer package +
     // manual `global.Buffer =` assignment), not just type-only.
-    "types": ["node"],
+    // "jest" alongside it for the same reason: an explicit "types"
+    // array turns off automatic @types/* inclusion, so the test files'
+    // describe/it/expect globals need naming here too.
+    "types": ["node", "jest"],
     "paths": {
       "@/*": [
         "./src/*"
