@@ -10,6 +10,7 @@ import {
   type GestureResponderEvent,
 } from "react-native";
 import { ThemedText } from "@/components/themed-text";
+import { VehicleDiagram, VIEW_ASPECT } from "@/components/vehicle-diagram";
 import { ThemedView } from "@/components/themed-view";
 import { Spacing } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
@@ -25,14 +26,11 @@ const VIEWS: { value: DamageView; label: string }[] = [
 ];
 
 /**
- * No real vehicle diagram artwork exists (no image generation available,
- * and this is deliberately deferred past the "core screens exist" point
- * — see fleetly-mobile-progress memory's design-pass note) — a plain
- * bordered rectangle stands in for it. positionX/positionY are still
- * genuinely meaningful fractional coordinates within whatever `view`
- * was selected, the same shape report-damage.dto.ts expects; swapping
- * in a real diagram image later only touches this component's
- * rendering, not the data it produces.
+ * Tap-to-mark against the vehicle outline for the selected view — the
+ * same VehicleDiagram the opening damage register draws its markers on,
+ * so a mark is placed and later read back over identical artwork.
+ * positionX/positionY stay fractional coordinates within the view, the
+ * shape report-damage.dto.ts expects.
  */
 export function ReportDamageView({
   tripId,
@@ -41,7 +39,13 @@ export function ReportDamageView({
   onDone,
   onCancel,
 }: {
-  tripId: string;
+  /**
+   * Absent at the opening condition check: damage found while checking a
+   * vehicle out is recorded against the vehicle before any trip exists.
+   * `damage.trip_id` is nullable for exactly this, and the DTO already
+   * treats it as optional.
+   */
+  tripId?: string;
   vehicleId: string;
   /**
    * docs/trip-state-machine.md: damage reported mid-route stays
@@ -53,7 +57,7 @@ export function ReportDamageView({
    * before this view calls onDone(); "mid_route" (the default, and the
    * only mode this view supported before) does not.
    */
-  phase?: "mid_route" | "closing";
+  phase?: "opening" | "mid_route" | "closing";
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -104,7 +108,13 @@ export function ReportDamageView({
         positionX: position.x,
         positionY: position.y,
         tripId,
-        reportedPhase: phase,
+        // No trip yet (the opening check runs before the trip exists)
+        // means no phase: damage_phase_requires_trip is
+        // `reported_phase is null or trip_id is not null`, so a phase
+        // without a trip is rejected outright. The row is still
+        // perfectly meaningful — it is damage against the vehicle,
+        // which is what the register is.
+        reportedPhase: tripId ? phase : undefined,
         note: note.trim() || undefined,
       });
       if (phase === "closing") {
@@ -183,7 +193,11 @@ export function ReportDamageView({
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <ThemedText type="subtitle" style={styles.title}>
-        {phase === "closing" ? "Damage found at closing" : "Report damage"}
+        {phase === "closing"
+          ? "Damage found at closing"
+          : phase === "opening"
+            ? "Damage found before starting"
+            : "Report damage"}
       </ThemedText>
       {phase === "closing" && (
         <ThemedText themeColor="textSecondary" style={styles.hint}>
@@ -220,8 +234,9 @@ export function ReportDamageView({
       <Pressable
         ref={padRef}
         onPress={handlePadPress}
-        style={[styles.pad, { borderColor: theme.backgroundSelected }]}
+        style={[styles.pad, { aspectRatio: VIEW_ASPECT[view], borderColor: theme.backgroundSelected }]}
       >
+        <VehicleDiagram view={view} stroke={theme.text} />
         {position && (
           <View
             style={[
@@ -298,7 +313,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   pad: {
-    height: 220,
+    // Height comes from the view's own aspect ratio, applied inline —
+    // a fixed height would letterbox the side views and distort where a
+    // tap lands relative to the outline.
+    width: "100%",
     borderWidth: 2,
     borderRadius: Spacing.three,
     alignItems: "center",

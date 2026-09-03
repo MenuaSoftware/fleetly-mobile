@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, TextInput } from "react-native";
 import { OrDivider } from "@/components/or-divider";
+import { ReportDamageView } from "@/components/report-damage-view";
+import { VehicleDamageRegister } from "@/components/vehicle-damage-register";
 import { QrScanner } from "@/components/qr-scanner";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -26,12 +28,18 @@ import { getVehicle, startTrip, VehicleInfo } from "@/lib/trips";
  */
 export function StartTripView({ onStarted }: { onStarted: () => void }) {
   const theme = useTheme();
-  const [step, setStep] = useState<"vehicle" | "odometer">("vehicle");
+  const [step, setStep] = useState<"vehicle" | "damage" | "odometer">("vehicle");
   const [vehicleId, setVehicleId] = useState("");
   const [vehicle, setVehicle] = useState<VehicleInfo | null>(null);
   const [odometer, setOdometer] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [isReportingDamage, setIsReportingDamage] = useState(false);
+  // The register's own remount key: reporting new damage has to bring
+  // the driver back to a freshly loaded list, or they would confirm a
+  // set of ids that no longer describes the vehicle.
+  const [registerKey, setRegisterKey] = useState(0);
+  const [acknowledgedDamageIds, setAcknowledgedDamageIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Takes the id explicitly rather than reading state: the scan path
@@ -49,7 +57,7 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
         return;
       }
       setVehicle(found);
-      setStep("odometer");
+      setStep("damage");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not find that vehicle.");
     } finally {
@@ -69,7 +77,7 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
     setIsLoading(true);
     setError(null);
     try {
-      await startTrip({ vehicleId: vehicle.id, startOdometer });
+      await startTrip({ vehicleId: vehicle.id, startOdometer, acknowledgedDamageIds });
       onStarted();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not start the trip.");
@@ -80,9 +88,12 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedText type="subtitle" style={styles.title}>
-        Start a trip
-      </ThemedText>
+      {/* The register carries its own heading and close control. */}
+      {step !== "damage" && (
+        <ThemedText type="subtitle" style={styles.title}>
+          Start a trip
+        </ThemedText>
+      )}
 
       {step === "vehicle" && (
         <>
@@ -152,6 +163,40 @@ export function StartTripView({ onStarted }: { onStarted: () => void }) {
             )}
           </Pressable>
         </>
+      )}
+
+      {step === "damage" && vehicle && (
+        isReportingDamage ? (
+          <ReportDamageView
+            vehicleId={vehicle.id}
+            phase="opening"
+            onDone={() => {
+              setIsReportingDamage(false);
+              // Force the register to refetch: the mark just added has to
+              // appear, and be among the ids the driver then confirms.
+              setRegisterKey((k) => k + 1);
+            }}
+            onCancel={() => setIsReportingDamage(false)}
+          />
+        ) : (
+          <VehicleDamageRegister
+            key={registerKey}
+            vehicleId={vehicle.id}
+            plate={vehicle.plate}
+            bodyType={vehicle.bodyType as "van" | "truck" | "car"}
+            onReportNew={() => setIsReportingDamage(true)}
+            onConfirm={(ids) => {
+              setAcknowledgedDamageIds(ids);
+              setStep("odometer");
+            }}
+            onCancel={() => {
+              setStep("vehicle");
+              setVehicle(null);
+              setAcknowledgedDamageIds([]);
+              setError(null);
+            }}
+          />
+        )
       )}
 
       {step === "odometer" && vehicle && (

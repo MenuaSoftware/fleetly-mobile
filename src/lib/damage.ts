@@ -17,6 +17,33 @@ export interface DamageReport {
   status: string;
 }
 
+/** damage.controller.ts's DamageSummary, the fields this app actually uses. */
+export interface DamageSummary {
+  id: string;
+  vehicleId: string;
+  tripId: string | null;
+  reportedPhase: string | null;
+  status: "reported" | "accepted" | "dismissed" | "repaired";
+  view: DamageView;
+  positionX: number;
+  positionY: number;
+  reportedAt: string;
+}
+
+/**
+ * The vehicle's standing damage register. @Authenticated(), not
+ * staff-only — a driver checking a vehicle out is exactly who needs to
+ * see what is already recorded against it before they agree it is
+ * complete.
+ *
+ * Dismissed and repaired rows come back too, and are filtered at the
+ * call site rather than here: what counts as "still open" is a product
+ * decision belonging to the screen, not to the transport.
+ */
+export function listDamage(vehicleId: string): Promise<DamageSummary[]> {
+  return apiFetch<DamageSummary[]>(`/vehicles/${vehicleId}/damage`);
+}
+
 /**
  * damage.controller.ts's report() is @Authenticated() (any of driver/
  * dispatcher/general_admin), not @DriverOnly() — "Report damage | yes |
